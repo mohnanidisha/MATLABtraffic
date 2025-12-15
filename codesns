@@ -1,0 +1,163 @@
+clc; clear; close all;
+
+% Simulation settings
+fps = 30; dt = 1/fps;
+numCars = 6;              % cars in each direction
+roadWidth = 120;          % width of each road
+carLength = 30;
+carWidth = 15;
+safeGap = 8;              % minimum gap between cars (pixels)
+
+% Stop line positions (front-of-car compared against these)
+stopLineH = -40; % horizontal stop line (x)
+stopLineV = -40; % vertical stop line (y)
+
+% Random car speeds (pixels per frame)
+speedH = 1.2 + rand(1,numCars)*1.8; % horizontal car speeds (1.2–3.0)
+speedV = 1.2 + rand(1,numCars)*1.8; % vertical car speeds
+
+% Random car colors
+colors = {'cyan','yellow','red','green','blue','magenta','white'};
+
+% Figure setup
+figure('Color','k');
+axis equal;
+hold on;
+set(gca,'color',[0.2 0.2 0.2],'XColor','none','YColor','none');
+xlim([-240 240]);
+ylim([-220 220]);
+
+% Roads
+rectangle('Position',[-200 -roadWidth/2 400 roadWidth],'FaceColor',[0.3 0.3 0.3]); % horizontal
+rectangle('Position',[-roadWidth/2 -200 roadWidth 400],'FaceColor',[0.3 0.3 0.3]); % vertical
+
+% Lane dividers
+for i=-180:40:180
+    plot([i i+20], [roadWidth/4 roadWidth/4],'w','LineWidth',2);
+    plot([i i+20], [-roadWidth/4 -roadWidth/4],'w','LineWidth',2);
+    plot([roadWidth/4 roadWidth/4],[i i+20],'w','LineWidth',2);
+    plot([-roadWidth/4 -roadWidth/4],[i i+20],'w','LineWidth',2);
+end
+
+% Traffic lights (top, bottom, left, right)
+lightTop    = rectangle('Position',[-15 90 30 30],'Curvature',0.2,'FaceColor','red');
+lightBottom = rectangle('Position',[-15 -120 30 30],'Curvature',0.2,'FaceColor','red');
+lightLeft   = rectangle('Position',[-120 -15 30 30],'Curvature',0.2,'FaceColor','green'); % start green for horizontal
+lightRight  = rectangle('Position',[90 -15 30 30],'Curvature',0.2,'FaceColor','green');
+
+% Cars: store body + wheels
+carsH = gobjects(numCars,3); % horizontal cars (body + 2 wheels)
+carsV = gobjects(numCars,3); % vertical cars
+
+% Initial positions (spaced so they can queue)
+xPos = linspace(-220,-80,numCars);
+yPos = linspace(-220,-80,numCars);
+
+for i=1:numCars
+    % Horizontal cars (move right)
+    col = colors{randi(numel(colors))};
+    body = rectangle('Position',[xPos(i) -carWidth/2 carLength carWidth],...
+                     'Curvature',0.2,'FaceColor',col);
+    wheel1 = rectangle('Position',[xPos(i)+4 -carWidth/2-4 8 4],...
+                       'Curvature',1,'FaceColor','k');
+    wheel2 = rectangle('Position',[xPos(i)+4 carWidth/2 8 4],...
+                       'Curvature',1,'FaceColor','k');
+    carsH(i,:) = [body wheel1 wheel2];
+    
+    % Vertical cars (move up)
+    col = colors{randi(numel(colors))};
+    bodyV = rectangle('Position',[-carWidth/2 yPos(i) carWidth carLength],...
+                     'Curvature',0.2,'FaceColor',col);
+    wheel1V = rectangle('Position',[-carWidth/2-4 yPos(i)+4 4 8],...
+                       'Curvature',1,'FaceColor','k');
+    wheel2V = rectangle('Position',[carWidth/2 yPos(i)+4 4 8],...
+                       'Curvature',1,'FaceColor','k');
+    carsV(i,:) = [bodyV wheel1V wheel2V];
+end
+
+% Animation loop
+t = 0;
+while ishandle(gcf)  % stop cleanly if figure closed
+    t = t + dt;
+    
+    % Toggle lights every 5 seconds
+    if mod(floor(t),10) < 5
+        % Horizontal green, vertical red
+        set(lightLeft,'FaceColor','green'); set(lightRight,'FaceColor','green');
+        set(lightTop,'FaceColor','red');   set(lightBottom,'FaceColor','red');
+        greenH = true; greenV = false;
+    else
+        % Vertical green, horizontal red
+        set(lightLeft,'FaceColor','red');  set(lightRight,'FaceColor','red');
+        set(lightTop,'FaceColor','green'); set(lightBottom,'FaceColor','green');
+        greenH = false; greenV = true;
+    end
+    
+    % --- Horizontal cars (move right) ---
+    for i=1:numCars
+        posB = get(carsH(i,1),'Position');   % [x y w h], x is left
+        currFront = posB(1) + carLength;     % front x-coordinate
+        
+        % default: not blocked by car ahead
+        blockedByPrev = false;
+        if i>1
+            % get previous car position reliably (no direct indexing)
+            posPrev = get(carsH(i-1,1),'Position'); % left of previous car
+            prevLeft = posPrev(1);
+            % only consider it a blocker if previous car is actually ahead
+            if prevLeft > posB(1) && (prevLeft - currFront) < safeGap
+                blockedByPrev = true;
+            end
+        end
+        
+        % check red light stop (front reaches or crosses stop line)
+        stopBecauseRed = (~greenH && currFront >= stopLineH);
+        
+        if ~stopBecauseRed && ~blockedByPrev
+            posB(1) = posB(1) + speedH(i); % move forward
+        end
+        
+        % reset when off-screen
+        if posB(1) > 240
+            posB(1) = -240 - randi([10 60]); % randomize reset start a bit
+        end
+        
+        % update body and wheels
+        set(carsH(i,1),'Position',posB);
+        set(carsH(i,2),'Position',[posB(1)+4 posB(2)-4 8 4]);
+        set(carsH(i,3),'Position',[posB(1)+4 posB(2)+carWidth 8 4]);
+    end
+    
+    % --- Vertical cars (move up) ---
+    for i=1:numCars
+        posB = get(carsV(i,1),'Position');   % [x y w h], y is bottom
+        currFront = posB(2) + carLength;     % front y-coordinate (top)
+        
+        blockedByPrev = false;
+        if i>1
+            posPrev = get(carsV(i-1,1),'Position');
+            prevBottom = posPrev(2);
+            % previous car is ahead if its bottom y is greater than current bottom y
+            if prevBottom > posB(2) && (prevBottom - currFront) < safeGap
+                blockedByPrev = true;
+            end
+        end
+        
+        stopBecauseRed = (~greenV && currFront >= stopLineV);
+        
+        if ~stopBecauseRed && ~blockedByPrev
+            posB(2) = posB(2) + speedV(i); % move forward
+        end
+        
+        if posB(2) > 240
+            posB(2) = -240 - randi([10 60]);
+        end
+        
+        % update body and wheels
+        set(carsV(i,1),'Position',posB);
+        set(carsV(i,2),'Position',[posB(1)-4 posB(2)+4 4 8]);
+        set(carsV(i,3),'Position',[posB(1)+carWidth posB(2)+4 4 8]);
+    end
+    
+    pause(dt);
+end
